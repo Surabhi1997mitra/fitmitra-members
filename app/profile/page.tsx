@@ -525,7 +525,7 @@ function Step5({ formData, handleInputChange }: { formData: ProfileData; handleI
       <Select label="Fitness Experience" value={formData.fitness_experience || ''} options={['Beginner', 'Intermediate', 'Advanced']} onChange={(v) => handleInputChange('fitness_experience', v)} />
       <Input label="Workout Type" value={formData.workout_type || ''} onChange={(v) => handleInputChange('workout_type', v)} />
       <div className="grid grid-cols-2 gap-4">
-        <Select label="Workout Days/Week" value={formData.workout_days || ''} options={['2', '3', '4', '5', '6', '7']} onChange={(v) => handleInputChange('workout_days', v ? parseInt(v) : null)} />
+        <Select label="Workout Days/Week" value={String(formData.workout_days || '')} options={['2', '3', '4', '5', '6', '7']} onChange={(v) => handleInputChange('workout_days', v ? parseInt(v) : null)} />
         <Select label="Duration/Session" value={formData.workout_duration || ''} options={['30 min', '45 min', '60 min', '90 min']} onChange={(v) => handleInputChange('workout_duration', v)} />
       </div>
       <Select label="Equipment Available" value={formData.equipment_available || ''} options={['Full Gym', 'Home Dumbbells', 'Resistance Bands', 'Bodyweight Only']} onChange={(v) => handleInputChange('equipment_available', v)} />
