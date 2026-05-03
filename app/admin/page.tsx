@@ -58,6 +58,7 @@ export default function AdminPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   // Users tab state
   const [users, setUsers] = useState<Profile[]>([])
@@ -404,6 +405,7 @@ export default function AdminPage() {
   }
 
   const handleLogout = async () => {
+    setShowLogoutConfirm(false)
     await supabase.auth.signOut()
     router.push('/login')
   }
@@ -445,10 +447,12 @@ export default function AdminPage() {
             >
               <ArrowLeft size={20} />
             </Link>
-            <h1 className="text-2xl font-bold">
-              <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
-              <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
-            </h1>
+            <Link href="/dashboard">
+              <h1 className="text-2xl font-bold">
+                <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
+                <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
+              </h1>
+            </Link>
           </div>
           <div className="flex items-center gap-4">
             <button
@@ -462,7 +466,7 @@ export default function AdminPage() {
               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
             </button>
             <button
-              onClick={handleLogout}
+              onClick={() => setShowLogoutConfirm(true)}
               className="flex items-center gap-2 transition p-2 rounded-lg"
               style={{
                 color: 'var(--color-text-secondary)',
@@ -981,6 +985,46 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+
+      {/* Logout Confirmation Dialog */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="p-6 rounded-xl max-w-sm w-full"
+            style={{ backgroundColor: 'var(--color-bg-secondary)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
+              Are you sure you want to logout?
+            </h3>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 px-4 py-2 rounded-lg transition"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  borderWidth: '1px',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 px-4 py-2 rounded-lg text-white font-medium transition"
+                style={{ backgroundColor: 'var(--color-accent)' }}
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

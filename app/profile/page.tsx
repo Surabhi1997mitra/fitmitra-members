@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
-import { LogOut, Sun, Moon, ChevronLeft, ChevronRight, Home, Play, User } from 'lucide-react'
+import { LogOut, Sun, Moon, ChevronLeft, ChevronRight, Home, Play, User, Camera, Loader } from 'lucide-react'
 
 interface ProfileData {
   // Step 1: Personal Details
@@ -153,6 +153,13 @@ export default function ProfilePage() {
   const [formData, setFormData] = useState<ProfileData>({})
   const [existingProfile, setExistingProfile] = useState<ProfileData | null>(null)
 
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [progressPhotos, setProgressPhotos] = useState<{ id: string; url: string; created_at: string }[]>([])
+  const [photosLoading, setPhotosLoading] = useState(false)
+  const [uploadingPhotos, setUploadingPhotos] = useState(false)
+
   useEffect(() => {
     checkAuth()
   }, [])
@@ -183,6 +190,28 @@ export default function ProfilePage() {
       setExistingProfile(profile)
       setFormData(profile)
       setProfileCompleted(profile.completed)
+    }
+
+    // Fetch avatar and progress photos
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('avatar_url')
+      .eq('id', userId)
+      .single()
+
+    if (profileData?.avatar_url) {
+      setAvatarUrl(profileData.avatar_url)
+    }
+
+    // Fetch progress photos
+    const { data: photosData } = await supabase
+      .from('progress_photos')
+      .select('id, url, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (photosData) {
+      setProgressPhotos(photosData)
     }
   }
 
@@ -259,8 +288,79 @@ export default function ProfilePage() {
   }
 
   const handleLogout = async () => {
+    setShowLogoutConfirm(false)
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  const handleAvatarUpload = async (file: File) => {
+    if (!userId) return
+
+    setAvatarUploading(true)
+    try {
+      const fileName = `${userId}/avatar.jpg`
+      const { data, error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, { upsert: true })
+
+      if (uploadError) throw uploadError
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('avatars').getPublicUrl(fileName)
+
+      await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', userId)
+
+      setAvatarUrl(publicUrl)
+      setSuccessMessage('Avatar updated!')
+      setTimeout(() => setSuccessMessage(''), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload avatar')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleProgressPhotosUpload = async (files: FileList) => {
+    if (!userId || files.length === 0) return
+
+    setUploadingPhotos(true)
+    try {
+      const uploadedPhotos: { url: string; created_at: string }[] = []
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const fileName = `${userId}/${Date.now()}-${i}.jpg`
+
+        const { error: uploadError } = await supabase.storage
+          .from('progress-photos')
+          .upload(fileName, file)
+
+        if (uploadError) throw uploadError
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from('progress-photos').getPublicUrl(fileName)
+
+        const { data: insertData, error: insertError } = await supabase
+          .from('progress_photos')
+          .insert({ user_id: userId, url: publicUrl })
+          .select()
+          .single()
+
+        if (insertError) throw insertError
+
+        uploadedPhotos.push({ url: publicUrl, created_at: new Date().toISOString() })
+      }
+
+      setProgressPhotos((prev) => [...uploadedPhotos, ...prev])
+      setSuccessMessage(`${uploadedPhotos.length} photo(s) uploaded!`)
+      setTimeout(() => setSuccessMessage(''), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload photos')
+    } finally {
+      setUploadingPhotos(false)
+    }
   }
 
   if (!mounted || loading) {
@@ -276,10 +376,12 @@ export default function ProfilePage() {
       {/* Header */}
       <header className="sticky top-0 z-40" style={{ backgroundColor: 'var(--color-bg-primary)', borderBottomColor: 'var(--color-border)', borderBottomWidth: '1px' }}>
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">
-            <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
-            <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
-          </h1>
+          <Link href="/dashboard">
+            <h1 className="text-2xl font-bold">
+              <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
+              <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
+            </h1>
+          </Link>
           <div className="flex items-center gap-4">
             <button
               onClick={toggleTheme}
@@ -292,7 +394,7 @@ export default function ProfilePage() {
               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
             </button>
             <button
-              onClick={handleLogout}
+              onClick={() => setShowLogoutConfirm(true)}
               className="flex items-center gap-2 transition p-2 rounded-lg"
               style={{
                 color: 'var(--color-text-secondary)',
@@ -304,6 +406,48 @@ export default function ProfilePage() {
           </div>
         </div>
       </header>
+
+      {/* Avatar Section */}
+      <div className="max-w-2xl mx-auto px-4 pt-6">
+        <div className="flex flex-col items-center">
+          <div className="relative">
+            <div
+              className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold overflow-hidden"
+              style={{
+                backgroundColor: avatarUrl ? 'transparent' : 'var(--color-accent)',
+                color: 'white',
+              }}
+            >
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : user?.email ? (
+                user.email[0].toUpperCase()
+              ) : (
+                '?'
+              )}
+            </div>
+            <label
+              className="absolute bottom-0 right-0 p-2 rounded-full cursor-pointer transition"
+              style={{ backgroundColor: 'var(--color-accent)' }}
+              title="Upload photo"
+            >
+              <Camera size={16} color="white" />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => e.target.files && handleAvatarUpload(e.target.files[0])}
+                className="hidden"
+                disabled={avatarUploading}
+              />
+            </label>
+            {avatarUploading && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                <Loader size={20} className="animate-spin text-white" />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Main Content */}
       <main className="max-w-2xl mx-auto px-4 py-8">
@@ -349,6 +493,63 @@ export default function ProfilePage() {
                 </div>
               </div>
             ))}
+
+            {/* Progress Photos Section */}
+            <div className="mb-6 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+              <h3 className="font-bold mb-4 text-lg" style={{ color: 'var(--color-accent)' }}>
+                Progress Photos
+              </h3>
+
+              {/* Upload Area */}
+              <div className="mb-6">
+                <label
+                  className="block p-4 rounded-lg border-2 border-dashed text-center cursor-pointer transition"
+                  style={{
+                    backgroundColor: 'var(--color-bg-primary)',
+                    borderColor: 'var(--color-border)',
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => e.target.files && handleProgressPhotosUpload(e.target.files)}
+                    className="hidden"
+                    disabled={uploadingPhotos}
+                  />
+                  <p style={{ color: 'var(--color-text-primary)' }} className="font-medium">
+                    {uploadingPhotos ? 'Uploading...' : 'Click to upload progress photos'}
+                  </p>
+                  <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm mt-1">
+                    or drag and drop
+                  </p>
+                </label>
+              </div>
+
+              {/* Photos Grid */}
+              {progressPhotos.length > 0 && (
+                <div className="grid grid-cols-3 gap-3">
+                  {progressPhotos.map((photo) => (
+                    <div key={photo.id} className="flex flex-col">
+                      <img
+                        src={photo.url}
+                        alt="Progress"
+                        className="w-full aspect-square rounded-lg object-cover"
+                      />
+                      <p style={{ color: 'var(--color-text-muted)' }} className="text-xs mt-1 text-center">
+                        {new Date(photo.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {progressPhotos.length === 0 && !uploadingPhotos && (
+                <p style={{ color: 'var(--color-text-secondary)' }} className="text-center py-4">
+                  No photos uploaded yet
+                </p>
+              )}
+            </div>
           </div>
         ) : (
           /* STATE 1: Onboarding Form */
@@ -451,6 +652,46 @@ export default function ProfilePage() {
           </div>
         )}
       </main>
+
+      {/* Logout Confirmation Dialog */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="p-6 rounded-xl max-w-sm w-full"
+            style={{ backgroundColor: 'var(--color-bg-secondary)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
+              Are you sure you want to logout?
+            </h3>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 px-4 py-2 rounded-lg transition"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  borderWidth: '1px',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 px-4 py-2 rounded-lg text-white font-medium transition"
+                style={{ backgroundColor: 'var(--color-accent)' }}
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0" style={{ backgroundColor: 'var(--color-bg-secondary)', borderTopColor: 'var(--color-border)', borderTopWidth: '1px' }}>

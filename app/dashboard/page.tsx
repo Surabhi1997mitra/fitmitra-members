@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
-import { LogOut, Home, Play, User, Search, X, Sun, Moon } from 'lucide-react'
+import { LogOut, Home, Play, User, Search, X, Sun, Moon, Plus } from 'lucide-react'
 import MuxPlayer from '@mux/mux-player-react'
 
 interface AuthUser {
@@ -37,6 +37,11 @@ export default function DashboardPage() {
   const [videos, setVideos] = useState<Video[]>([])
   const [filteredWorkouts, setFilteredWorkouts] = useState<Video[]>([])
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [showAddCategory, setShowAddCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [addingCategory, setAddingCategory] = useState(false)
 
   useEffect(() => {
     checkAuth()
@@ -58,15 +63,19 @@ export default function DashboardPage() {
 
     setUser({ ...session.user, id: session.user.id } as AuthUser)
 
-    // Check if user is admin
+    // Check if user is admin and fetch avatar
     const { data: profile } = await supabase
       .from('profiles')
-      .select('is_admin')
+      .select('is_admin, avatar_url')
       .eq('id', session.user.id)
       .single()
 
     if (profile?.is_admin) {
       setIsAdmin(true)
+    }
+
+    if (profile?.avatar_url) {
+      setAvatarUrl(profile.avatar_url)
     }
 
     await Promise.all([fetchCategories(), fetchVideos()])
@@ -113,8 +122,24 @@ export default function DashboardPage() {
   }
 
   const handleLogout = async () => {
+    setShowLogoutConfirm(false)
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return
+
+    setAddingCategory(true)
+    const { error } = await supabase.from('categories').insert({ name: newCategoryName.trim() })
+
+    if (!error) {
+      setNewCategoryName('')
+      setShowAddCategory(false)
+      await fetchCategories()
+    }
+
+    setAddingCategory(false)
   }
 
   if (loading || !mounted) {
@@ -130,10 +155,26 @@ export default function DashboardPage() {
       {/* Header */}
       <header className="sticky top-0 z-40" style={{ backgroundColor: 'var(--color-bg-primary)', borderBottomColor: 'var(--color-border)', borderBottomWidth: '1px' }}>
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">
-            <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
-            <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
-          </h1>
+          <Link href="/dashboard" className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">
+              <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
+              <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
+            </h1>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt="Avatar"
+                className="w-8 h-8 rounded-full object-cover"
+              />
+            ) : user?.email ? (
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                style={{ backgroundColor: 'var(--color-accent)' }}
+              >
+                {user.email[0].toUpperCase()}
+              </div>
+            ) : null}
+          </Link>
           <div className="flex items-center gap-4">
             {isAdmin && (
               <Link
@@ -159,7 +200,7 @@ export default function DashboardPage() {
               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
             </button>
             <button
-              onClick={handleLogout}
+              onClick={() => setShowLogoutConfirm(true)}
               className="flex items-center gap-2 transition p-2 rounded-lg"
               style={{
                 color: 'var(--color-text-secondary)',
@@ -216,7 +257,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Category Filter Pills */}
-        <div className="mb-8 flex gap-2 overflow-x-auto pb-2">
+        <div className="mb-8 flex gap-2 overflow-x-auto pb-2 items-center">
           {categories.map((category) => (
             <button
               key={category}
@@ -230,6 +271,46 @@ export default function DashboardPage() {
               {category}
             </button>
           ))}
+          {isAdmin && (
+            <button
+              onClick={() => setShowAddCategory(!showAddCategory)}
+              className="px-3 py-2 rounded-full transition flex items-center justify-center"
+              style={{
+                backgroundColor: 'var(--color-bg-secondary)',
+                color: 'var(--color-accent)',
+              }}
+              title="Add new category"
+            >
+              <Plus size={20} />
+            </button>
+          )}
+          {showAddCategory && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleAddCategory()}
+                placeholder="New category"
+                className="px-3 py-2 rounded-full text-sm focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  borderWidth: '1px',
+                  color: 'var(--color-text-primary)',
+                }}
+                autoFocus
+              />
+              <button
+                onClick={handleAddCategory}
+                disabled={addingCategory}
+                className="px-3 py-2 rounded-full text-sm font-medium text-white transition disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent)' }}
+              >
+                Save
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Workouts Section */}
@@ -275,10 +356,24 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-12">
-              <p style={{ color: 'var(--color-text-secondary)' }}>
-                No workouts found. Try adjusting your filters.
+            <div className="text-center py-16">
+              <div className="text-6xl mb-4">🏋️</div>
+              <p className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
+                No workouts here yet
               </p>
+              {isAdmin ? (
+                <Link
+                  href="/admin"
+                  className="inline-block px-4 py-2 rounded-lg text-white font-medium transition"
+                  style={{ backgroundColor: 'var(--color-accent)' }}
+                >
+                  + Add Video
+                </Link>
+              ) : (
+                <p style={{ color: 'var(--color-text-secondary)' }}>
+                  Check back soon!
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -352,6 +447,46 @@ export default function DashboardPage() {
           </Link>
         </div>
       </nav>
+
+      {/* Logout Confirmation Dialog */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="p-6 rounded-xl max-w-sm w-full"
+            style={{ backgroundColor: 'var(--color-bg-secondary)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
+              Are you sure you want to logout?
+            </h3>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 px-4 py-2 rounded-lg transition"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  borderWidth: '1px',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 px-4 py-2 rounded-lg text-white font-medium transition"
+                style={{ backgroundColor: 'var(--color-accent)' }}
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
