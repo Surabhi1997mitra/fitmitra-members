@@ -1,26 +1,44 @@
 @import "tailwindcss";
 
+/* Dark theme (default) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-primary: var(--font-montserrat);
+  --color-bg-primary: #1c1917;
+  --color-bg-secondary: #292524;
+  --color-bg-card: #2c2825;
+  --color-accent: #c17b8a;
+  --color-accent-hover: #ad6878;
+  --color-text-primary: #f5f0eb;
+  --color-text-secondary: #a8998f;
+  --color-text-muted: #78695f;
+  --color-border: #3d3633;
+  --color-badge: rgba(193, 123, 138, 0.15);
+}
+
+/* Light theme */
+html.light {
+  --font-primary: var(--font-montserrat);
+  --color-bg-primary: #faf7f4;
+  --color-bg-secondary: #f0ebe5;
+  --color-bg-card: #ffffff;
+  --color-accent: #c17b8a;
+  --color-accent-hover: #ad6878;
+  --color-text-primary: #1c1917;
+  --color-text-secondary: #57534e;
+  --color-text-muted: #a8998f;
+  --color-border: #e2d9d0;
+  --color-badge: rgba(193, 123, 138, 0.15);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--color-bg-primary);
+  --color-foreground: var(--color-text-primary);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-primary);
 }
