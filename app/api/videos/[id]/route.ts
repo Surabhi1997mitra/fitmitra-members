@@ -11,6 +11,11 @@ if (!supabaseUrl || !supabaseServiceRoleKey || !muxTokenId || !muxTokenSecret) {
   throw new Error('Missing required environment variables')
 }
 
+const mux = new Mux({
+  tokenId: muxTokenId,
+  tokenSecret: muxTokenSecret,
+})
+
 interface JWTPayload {
   sub: string
   [key: string]: any
@@ -83,12 +88,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       console.log('✓ Video already ready')
       return NextResponse.json(video, { status: 200 })
     }
-
-    // Initialize Mux client
-    const mux = new Mux({
-      tokenId: muxTokenId!,
-      tokenSecret: muxTokenSecret!,
-    })
 
     let assetId = video.mux_asset_id
 
