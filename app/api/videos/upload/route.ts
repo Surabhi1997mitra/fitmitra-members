@@ -11,11 +11,6 @@ if (!supabaseUrl || !supabaseServiceRoleKey || !muxTokenId || !muxTokenSecret) {
   throw new Error('Missing required environment variables')
 }
 
-const mux = new Mux({
-  tokenId: muxTokenId,
-  tokenSecret: muxTokenSecret,
-})
-
 interface JWTPayload {
   sub: string
   [key: string]: any
@@ -82,6 +77,12 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Creating Mux upload URL...')
+
+    // Initialize Mux client
+    const mux = new Mux({
+      tokenId: muxTokenId,
+      tokenSecret: muxTokenSecret,
+    })
 
     // Create Mux direct upload URL
     const upload = await mux.video.uploads.create({
