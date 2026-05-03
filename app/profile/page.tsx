@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
-import { LogOut, Sun, Moon, ChevronLeft, ChevronRight, Home, Play, User, Camera, Loader } from 'lucide-react'
+import { LogOut, Sun, Moon, ChevronLeft, ChevronRight, Home, Play, User, Camera, Loader, UtensilsCrossed } from 'lucide-react'
 
 interface ProfileData {
   // Step 1: Personal Details
@@ -144,6 +144,7 @@ export default function ProfilePage() {
 
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
   const [profileCompleted, setProfileCompleted] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [submitting, setSubmitting] = useState(false)
@@ -175,6 +176,7 @@ export default function ProfilePage() {
     }
 
     setUserId(session.user.id)
+    setUserEmail(session.user.email || null)
     await fetchProfile(session.user.id)
     setLoading(false)
   }
@@ -420,8 +422,8 @@ export default function ProfilePage() {
             >
               {avatarUrl ? (
                 <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-              ) : user?.email ? (
-                user.email[0].toUpperCase()
+              ) : userEmail ? (
+                userEmail[0].toUpperCase()
               ) : (
                 '?'
               )}
@@ -705,13 +707,20 @@ export default function ProfilePage() {
             <span className="text-xs mt-1 font-medium">Home</span>
           </Link>
           <Link
-            href="/dashboard"
+            href="/workouts"
             className="flex flex-col items-center justify-center py-4 transition"
             style={{ color: 'var(--color-text-secondary)' }}
-            onClick={() => document.getElementById('workouts-section')?.scrollIntoView({ behavior: 'smooth' })}
           >
             <Play size={24} />
             <span className="text-xs mt-1 font-medium">Workouts</span>
+          </Link>
+          <Link
+            href="/recipes"
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <UtensilsCrossed size={24} />
+            <span className="text-xs mt-1 font-medium">Recipes</span>
           </Link>
           <Link
             href="/profile"

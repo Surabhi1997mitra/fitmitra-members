@@ -27,6 +27,9 @@ interface Profile {
   access_expires_at: string
   is_active: boolean
   created_at: string
+  client_profile?: {
+    completed: boolean
+  }
 }
 
 interface Video {
@@ -49,11 +52,29 @@ interface Category {
   name: string
 }
 
+interface Recipe {
+  id: string
+  title: string
+  description?: string
+  category: string
+  calories?: number
+  protein?: number
+  carbs?: number
+  fat?: number
+  ingredients?: string[]
+  instructions?: string[]
+  image_url?: string
+  tags?: string[]
+  created_at: string
+}
+
+const RECIPE_CATEGORIES = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Pre-workout', 'Post-workout']
+
 export default function AdminPage() {
   const router = useRouter()
   const { theme, toggleTheme, mounted } = useTheme()
 
-  const [activeTab, setActiveTab] = useState<'users' | 'videos'>('users')
+  const [activeTab, setActiveTab] = useState<'users' | 'videos' | 'recipes'>('users')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -74,6 +95,23 @@ export default function AdminPage() {
   const [showAddVideoForm, setShowAddVideoForm] = useState(false)
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([])
   const xhrMap = useRef<Map<string, XMLHttpRequest>>(new Map())
+
+  // Recipes tab state
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [showAddRecipeForm, setShowAddRecipeForm] = useState(false)
+  const [newRecipe, setNewRecipe] = useState({
+    title: '',
+    description: '',
+    category: '',
+    calories: '',
+    protein: '',
+    carbs: '',
+    fat: '',
+    ingredients: '',
+    instructions: '',
+    image_url: '',
+    tags: '',
+  })
 
   useEffect(() => {
     checkAuth()
@@ -108,14 +146,14 @@ export default function AdminPage() {
     }
 
     console.log('Admin verified, loading data...')
-    await Promise.all([fetchUsers(), fetchVideos(), fetchCategories()])
+    await Promise.all([fetchUsers(), fetchVideos(), fetchCategories(), fetchRecipes()])
     setLoading(false)
   }
 
   const fetchUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, email, access_expires_at, is_active, created_at')
+      .select('id, full_name, email, access_expires_at, is_active, created_at, client_profile(completed)')
       .order('created_at', { ascending: false })
 
     if (!error && data) {
@@ -142,6 +180,17 @@ export default function AdminPage() {
 
     if (!error && data) {
       setCategories(data as Category[])
+    }
+  }
+
+  const fetchRecipes = async () => {
+    const { data, error } = await supabase
+      .from('recipes')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (!error && data) {
+      setRecipes(data as Recipe[])
     }
   }
 
@@ -228,6 +277,41 @@ export default function AdminPage() {
     }
 
     await fetchUsers()
+  }
+
+  const handleResendInvite = async (email: string) => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) {
+      setError('Session expired')
+      return
+    }
+
+    const authHeader = `Bearer ${session.access_token}`
+
+    try {
+      const response = await fetch('/api/admin/resend-invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+        },
+        body: JSON.stringify({ email }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        setError(errorData.error || 'Failed to resend invite')
+        return
+      }
+
+      setSuccessMessage(`Invite resent to ${email}`)
+      setTimeout(() => setSuccessMessage(''), 5000)
+    } catch (err) {
+      setError('An error occurred while resending invite')
+    }
   }
 
   const updateItem = (id: string, patch: Partial<UploadItem>) => {
@@ -404,6 +488,72 @@ export default function AdminPage() {
     await fetchVideos()
   }
 
+  const handleCreateRecipe = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    setError('')
+    setSuccessMessage('')
+
+    try {
+      const { error } = await supabase.from('recipes').insert({
+        title: newRecipe.title,
+        description: newRecipe.description || null,
+        category: newRecipe.category,
+        calories: newRecipe.calories ? parseInt(newRecipe.calories) : null,
+        protein: newRecipe.protein ? parseInt(newRecipe.protein) : null,
+        carbs: newRecipe.carbs ? parseInt(newRecipe.carbs) : null,
+        fat: newRecipe.fat ? parseInt(newRecipe.fat) : null,
+        ingredients: newRecipe.ingredients.split('\n').filter(Boolean),
+        instructions: newRecipe.instructions.split('\n').filter(Boolean),
+        image_url: newRecipe.image_url || null,
+        tags: newRecipe.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      })
+
+      if (error) {
+        setError(error.message || 'Failed to create recipe')
+        setSubmitting(false)
+        return
+      }
+
+      setSuccessMessage('Recipe created successfully!')
+      setNewRecipe({
+        title: '',
+        description: '',
+        category: '',
+        calories: '',
+        protein: '',
+        carbs: '',
+        fat: '',
+        ingredients: '',
+        instructions: '',
+        image_url: '',
+        tags: '',
+      })
+      setShowAddRecipeForm(false)
+      await fetchRecipes()
+      setSubmitting(false)
+
+      setTimeout(() => setSuccessMessage(''), 5000)
+    } catch (err) {
+      setError('An error occurred')
+      setSubmitting(false)
+    }
+  }
+
+  const handleDeleteRecipe = async (recipeId: string) => {
+    const confirmed = window.confirm('Delete this recipe?')
+    if (!confirmed) return
+
+    const { error } = await supabase.from('recipes').delete().eq('id', recipeId)
+
+    if (error) {
+      setError('Failed to delete recipe')
+      return
+    }
+
+    await fetchRecipes()
+  }
+
   const handleLogout = async () => {
     setShowLogoutConfirm(false)
     await supabase.auth.signOut()
@@ -501,6 +651,16 @@ export default function AdminPage() {
             }}
           >
             Videos
+          </button>
+          <button
+            onClick={() => setActiveTab('recipes')}
+            className="pb-4 font-semibold transition border-b-2"
+            style={{
+              color: activeTab === 'recipes' ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+              borderBottomColor: activeTab === 'recipes' ? 'var(--color-accent)' : 'transparent',
+            }}
+          >
+            Recipes
           </button>
         </div>
 
@@ -625,47 +785,71 @@ export default function AdminPage() {
             {/* Users List */}
             <div className="space-y-3">
               {users.length > 0 ? (
-                users.map((user) => (
-                  <div
-                    key={user.id}
-                    className="p-4 rounded-lg flex items-center justify-between"
-                    style={{ backgroundColor: 'var(--color-bg-secondary)' }}
-                  >
-                    <div className="flex-1">
-                      <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                        {user.full_name}
-                      </p>
-                      <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm">
-                        {user.email}
-                      </p>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span style={{ color: 'var(--color-text-muted)' }} className="text-xs">
-                          Expires: {formatDate(user.access_expires_at)}
-                        </span>
-                        <span
-                          className="px-2 py-1 rounded-full text-xs font-semibold"
+                users.map((user) => {
+                  const hasLoggedIn = !!user.full_name
+                  const profileCompleted = (user.client_profile as any)?.completed
+                  return (
+                    <div
+                      key={user.id}
+                      className="p-4 rounded-lg flex items-center justify-between"
+                      style={{ backgroundColor: 'var(--color-bg-secondary)' }}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                            {user.full_name || user.email.split('@')[0]}
+                          </p>
+                          <span className="text-lg">{profileCompleted ? '🟢' : '🔴'}</span>
+                          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                            {profileCompleted ? 'Profile filled' : 'No profile'}
+                          </span>
+                        </div>
+                        <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm">
+                          {user.email}
+                        </p>
+                        <div className="flex items-center gap-3 mt-2 flex-wrap">
+                          <span style={{ color: 'var(--color-text-muted)' }} className="text-xs">
+                            Expires: {formatDate(user.access_expires_at)}
+                          </span>
+                          <span
+                            className="px-2 py-1 rounded-full text-xs font-semibold"
+                            style={{
+                              backgroundColor: user.is_active && !isAccessExpired(user.access_expires_at) ? 'rgba(193, 123, 138, 0.2)' : 'rgba(0, 0, 0, 0.3)',
+                              color: user.is_active && !isAccessExpired(user.access_expires_at) ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                            }}
+                          >
+                            {user.is_active && !isAccessExpired(user.access_expires_at) ? 'Active' : 'Expired'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {!hasLoggedIn && (
+                          <button
+                            onClick={() => handleResendInvite(user.email)}
+                            className="px-4 py-2 rounded-lg transition text-sm font-medium"
+                            style={{
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                              color: '#3b82f6',
+                            }}
+                          >
+                            Resend Invite
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeactivateUser(user.id)}
+                          disabled={!user.is_active}
+                          className="px-4 py-2 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{
-                            backgroundColor: user.is_active && !isAccessExpired(user.access_expires_at) ? 'rgba(193, 123, 138, 0.2)' : 'rgba(0, 0, 0, 0.3)',
-                            color: user.is_active && !isAccessExpired(user.access_expires_at) ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                            backgroundColor: 'rgba(193, 123, 138, 0.2)',
+                            color: 'var(--color-accent)',
                           }}
                         >
-                          {user.is_active && !isAccessExpired(user.access_expires_at) ? 'Active' : 'Expired'}
-                        </span>
+                          Deactivate
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleDeactivateUser(user.id)}
-                      disabled={!user.is_active}
-                      className="px-4 py-2 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: 'rgba(193, 123, 138, 0.2)',
-                        color: 'var(--color-accent)',
-                      }}
-                    >
-                      Deactivate
-                    </button>
-                  </div>
-                ))
+                  )
+                })
               ) : (
                 <p style={{ color: 'var(--color-text-secondary)' }}>No users yet.</p>
               )}
@@ -980,6 +1164,329 @@ export default function AdminPage() {
                 })
               ) : (
                 <p style={{ color: 'var(--color-text-secondary)' }}>No videos yet.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* RECIPES TAB */}
+        {activeTab === 'recipes' && (
+          <div className="py-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
+                Recipes
+              </h2>
+              <button
+                onClick={() => setShowAddRecipeForm(!showAddRecipeForm)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-white transition font-semibold"
+                style={{
+                  backgroundColor: 'var(--color-accent)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                }}
+              >
+                <Plus size={20} />
+                Add Recipe
+              </button>
+            </div>
+
+            {/* Add Recipe Form */}
+            {showAddRecipeForm && (
+              <div className="mb-6 p-6 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                    New Recipe
+                  </h3>
+                  <button
+                    onClick={() => setShowAddRecipeForm(false)}
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <form onSubmit={handleCreateRecipe} className="space-y-4">
+                  {/* Title */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      value={newRecipe.title}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, title: e.target.value })}
+                      required
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    />
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Description
+                    </label>
+                    <textarea
+                      value={newRecipe.description}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, description: e.target.value })}
+                      rows={2}
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    />
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Category
+                    </label>
+                    <select
+                      value={newRecipe.category}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, category: e.target.value })}
+                      required
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    >
+                      <option value="">Select a category</option>
+                      {RECIPE_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Macros */}
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                        Calories
+                      </label>
+                      <input
+                        type="number"
+                        value={newRecipe.calories}
+                        onChange={(e) => setNewRecipe({ ...newRecipe, calories: e.target.value })}
+                        className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--color-bg-primary)',
+                          borderColor: 'var(--color-border)',
+                          borderWidth: '1px',
+                          color: 'var(--color-text-primary)',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                        Protein (g)
+                      </label>
+                      <input
+                        type="number"
+                        value={newRecipe.protein}
+                        onChange={(e) => setNewRecipe({ ...newRecipe, protein: e.target.value })}
+                        className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--color-bg-primary)',
+                          borderColor: 'var(--color-border)',
+                          borderWidth: '1px',
+                          color: 'var(--color-text-primary)',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                        Carbs (g)
+                      </label>
+                      <input
+                        type="number"
+                        value={newRecipe.carbs}
+                        onChange={(e) => setNewRecipe({ ...newRecipe, carbs: e.target.value })}
+                        className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--color-bg-primary)',
+                          borderColor: 'var(--color-border)',
+                          borderWidth: '1px',
+                          color: 'var(--color-text-primary)',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                        Fat (g)
+                      </label>
+                      <input
+                        type="number"
+                        value={newRecipe.fat}
+                        onChange={(e) => setNewRecipe({ ...newRecipe, fat: e.target.value })}
+                        className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--color-bg-primary)',
+                          borderColor: 'var(--color-border)',
+                          borderWidth: '1px',
+                          color: 'var(--color-text-primary)',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Ingredients */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Ingredients
+                    </label>
+                    <textarea
+                      value={newRecipe.ingredients}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, ingredients: e.target.value })}
+                      placeholder="One per line"
+                      rows={3}
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    />
+                  </div>
+
+                  {/* Instructions */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Instructions
+                    </label>
+                    <textarea
+                      value={newRecipe.instructions}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, instructions: e.target.value })}
+                      placeholder="One per line"
+                      rows={3}
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    />
+                  </div>
+
+                  {/* Image URL */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Image URL (optional)
+                    </label>
+                    <input
+                      type="url"
+                      value={newRecipe.image_url}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, image_url: e.target.value })}
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    />
+                  </div>
+
+                  {/* Tags */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Tags (comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={newRecipe.tags}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, tags: e.target.value })}
+                      placeholder="e.g. vegan, gluten-free, quick"
+                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: 'var(--color-border)',
+                        borderWidth: '1px',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full py-2 rounded-lg text-white font-semibold transition"
+                    style={{
+                      backgroundColor: submitting ? 'rgba(193, 123, 138, 0.5)' : 'var(--color-accent)',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!submitting) e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!submitting) e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                    }}
+                  >
+                    {submitting ? 'Creating...' : 'Create Recipe'}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* Recipes List */}
+            <div className="space-y-3">
+              {recipes.length > 0 ? (
+                recipes.map((recipe) => (
+                  <div
+                    key={recipe.id}
+                    className="p-4 rounded-lg flex items-center justify-between"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)' }}
+                  >
+                    <div className="flex-1">
+                      <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                        {recipe.title}
+                      </p>
+                      <div className="flex items-center gap-3 mt-2">
+                        <span
+                          className="px-2 py-1 rounded-full text-xs font-semibold"
+                          style={{ backgroundColor: 'rgba(193, 123, 138, 0.2)', color: 'var(--color-accent)' }}
+                        >
+                          {recipe.category}
+                        </span>
+                        {recipe.calories && (
+                          <span style={{ color: 'var(--color-text-secondary)' }} className="text-sm">
+                            {recipe.calories} cal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteRecipe(recipe.id)}
+                      className="p-2 rounded-lg transition"
+                      style={{
+                        backgroundColor: 'rgba(193, 123, 138, 0.2)',
+                        color: 'var(--color-accent)',
+                      }}
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p style={{ color: 'var(--color-text-secondary)' }}>No recipes yet.</p>
               )}
             </div>
           </div>
