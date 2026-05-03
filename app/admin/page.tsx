@@ -27,9 +27,9 @@ interface Profile {
   access_expires_at: string
   is_active: boolean
   created_at: string
-  client_profile?: {
+  client_profile?: Array<{
     completed: boolean
-  }
+  }>
 }
 
 interface Video {
@@ -787,7 +787,7 @@ export default function AdminPage() {
               {users.length > 0 ? (
                 users.map((user) => {
                   const hasLoggedIn = !!user.full_name
-                  const profileCompleted = (user.client_profile as any)?.completed
+                  const profileCompleted = user.client_profile?.[0]?.completed
                   return (
                     <div
                       key={user.id}

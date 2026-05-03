@@ -328,7 +328,7 @@ export default function ProfilePage() {
 
     setUploadingPhotos(true)
     try {
-      const uploadedPhotos: { url: string; created_at: string }[] = []
+      const uploadedPhotos: { id: string; url: string; created_at: string }[] = []
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
@@ -352,7 +352,11 @@ export default function ProfilePage() {
 
         if (insertError) throw insertError
 
-        uploadedPhotos.push({ url: publicUrl, created_at: new Date().toISOString() })
+        uploadedPhotos.push({
+          id: insertData.id,
+          url: publicUrl,
+          created_at: insertData.created_at,
+        })
       }
 
       setProgressPhotos((prev) => [...uploadedPhotos, ...prev])

@@ -171,20 +171,6 @@ export default function DashboardPage() {
     router.push('/login')
   }
 
-  const handleAddCategory = async () => {
-    if (!newCategoryName.trim()) return
-
-    setAddingCategory(true)
-    const { error } = await supabase.from('categories').insert({ name: newCategoryName.trim() })
-
-    if (!error) {
-      setNewCategoryName('')
-      setShowAddCategory(false)
-      await fetchCategories()
-    }
-
-    setAddingCategory(false)
-  }
 
   if (loading || !mounted) {
     return (

@@ -12,6 +12,7 @@
     "@mux/mux-node": "^14.0.1",
     "@mux/mux-player-react": "^3.13.0",
     "@supabase/supabase-js": "^2.105.1",
+    "jwt-decode": "^4.0.0",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
     "react": "19.2.4",
