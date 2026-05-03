@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
+import { Eye, EyeOff } from 'lucide-react'
 
 export default function ConfirmPage() {
   const router = useRouter()
@@ -15,6 +16,8 @@ export default function ConfirmPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [hasToken, setHasToken] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   useEffect(() => {
     // Extract access token from URL hash
@@ -114,22 +117,33 @@ export default function ConfirmPage() {
                 >
                   New Password
                 </label>
-                <input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className="w-full px-4 py-3 rounded-lg focus:outline-none focus:ring-2 transition"
-                  style={{
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderColor: 'var(--color-border)',
-                    borderWidth: '1px',
-                    color: 'var(--color-text-primary)',
-                  }}
-                />
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full px-4 py-3 pr-12 rounded-lg focus:outline-none focus:ring-2 transition"
+                    style={{
+                      backgroundColor: 'var(--color-bg-secondary)',
+                      borderColor: 'var(--color-border)',
+                      borderWidth: '1px',
+                      color: 'var(--color-text-primary)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 transition"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
                 <p style={{ color: 'var(--color-text-muted)' }} className="text-xs mt-1">
                   Minimum 6 characters
                 </p>
@@ -144,22 +158,33 @@ export default function ConfirmPage() {
                 >
                   Confirm Password
                 </label>
-                <input
-                  id="confirmPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className="w-full px-4 py-3 rounded-lg focus:outline-none focus:ring-2 transition"
-                  style={{
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    borderColor: 'var(--color-border)',
-                    borderWidth: '1px',
-                    color: 'var(--color-text-primary)',
-                  }}
-                />
+                <div className="relative">
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full px-4 py-3 pr-12 rounded-lg focus:outline-none focus:ring-2 transition"
+                    style={{
+                      backgroundColor: 'var(--color-bg-secondary)',
+                      borderColor: 'var(--color-border)',
+                      borderWidth: '1px',
+                      color: 'var(--color-text-primary)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 transition"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </div>
 
               {/* Error Message */}

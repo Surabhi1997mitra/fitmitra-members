@@ -230,7 +230,11 @@ export default function DashboardPage() {
             <Play size={24} />
             <span className="text-xs mt-1 font-medium">Workouts</span>
           </button>
-          <button className="flex flex-col items-center justify-center py-4 transition" style={{ color: 'var(--color-text-secondary)' }}>
+          <button
+            onClick={() => router.push('/profile')}
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
             <User size={24} />
             <span className="text-xs mt-1 font-medium">Profile</span>
           </button>

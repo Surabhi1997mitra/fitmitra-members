@@ -35,15 +35,18 @@ alter table public.categories enable row level security;
 alter table public.videos enable row level security;
 
 -- Profiles RLS policies
+drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
   on public.profiles for select
   using (auth.uid() = id);
 
+drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
 -- Categories RLS policies
+drop policy if exists "Authenticated users with active access can read categories" on public.categories;
 create policy "Authenticated users with active access can read categories"
   on public.categories for select
   using (
@@ -56,6 +59,7 @@ create policy "Authenticated users with active access can read categories"
     )
   );
 
+drop policy if exists "Only admins can insert categories" on public.categories;
 create policy "Only admins can insert categories"
   on public.categories for insert
   with check (
@@ -66,6 +70,7 @@ create policy "Only admins can insert categories"
     )
   );
 
+drop policy if exists "Only admins can update categories" on public.categories;
 create policy "Only admins can update categories"
   on public.categories for update
   using (
@@ -76,6 +81,7 @@ create policy "Only admins can update categories"
     )
   );
 
+drop policy if exists "Only admins can delete categories" on public.categories;
 create policy "Only admins can delete categories"
   on public.categories for delete
   using (
@@ -87,6 +93,7 @@ create policy "Only admins can delete categories"
   );
 
 -- Videos RLS policies
+drop policy if exists "Authenticated users with active access can read videos" on public.videos;
 create policy "Authenticated users with active access can read videos"
   on public.videos for select
   using (
@@ -99,6 +106,7 @@ create policy "Authenticated users with active access can read videos"
     )
   );
 
+drop policy if exists "Only admins can insert videos" on public.videos;
 create policy "Only admins can insert videos"
   on public.videos for insert
   with check (
@@ -109,6 +117,7 @@ create policy "Only admins can insert videos"
     )
   );
 
+drop policy if exists "Only admins can update videos" on public.videos;
 create policy "Only admins can update videos"
   on public.videos for update
   using (
@@ -119,6 +128,7 @@ create policy "Only admins can update videos"
     )
   );
 
+drop policy if exists "Only admins can delete videos" on public.videos;
 create policy "Only admins can delete videos"
   on public.videos for delete
   using (

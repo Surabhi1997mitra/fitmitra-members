@@ -16,21 +16,25 @@ as $$
 $$;
 
 -- RLS policy: Admins can read all profiles
+drop policy if exists "Admins can read all profiles" on public.profiles;
 create policy "Admins can read all profiles"
   on public.profiles for select
   using (public.is_user_admin());
 
 -- RLS policy: Admins can update all profiles
+drop policy if exists "Admins can update all profiles" on public.profiles;
 create policy "Admins can update all profiles"
   on public.profiles for update
   using (public.is_user_admin());
 
 -- RLS policy: Admins can read all categories
+drop policy if exists "Admins can read all categories" on public.categories;
 create policy "Admins can read all categories"
   on public.categories for select
   using (public.is_user_admin());
 
 -- RLS policy: Admins can read all videos
+drop policy if exists "Admins can read all videos" on public.videos;
 create policy "Admins can read all videos"
   on public.videos for select
   using (public.is_user_admin());
