@@ -21,6 +21,12 @@ interface Video {
   description: string
   category_id: string
   tags: string[]
+  mux_upload_id?: string
+  mux_asset_id?: string
+  mux_playback_id?: string
+  thumbnail_url?: string
+  duration?: number
+  status?: string
   created_at: string
 }
 
@@ -57,6 +63,10 @@ export default function AdminPage() {
     categoryId: '',
     tags: '',
   })
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'ready' | 'error'>('idle')
+  const [uploadingVideoId, setUploadingVideoId] = useState<string | null>(null)
 
   useEffect(() => {
     checkAuth()
@@ -109,7 +119,7 @@ export default function AdminPage() {
   const fetchVideos = async () => {
     const { data, error } = await supabase
       .from('videos')
-      .select('id, title, description, category_id, tags, created_at')
+      .select('id, title, description, category_id, tags, mux_upload_id, mux_asset_id, mux_playback_id, thumbnail_url, duration, status, created_at')
       .order('created_at', { ascending: false })
 
     if (!error && data) {
@@ -215,42 +225,149 @@ export default function AdminPage() {
 
   const handleCreateVideo = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSubmitting(true)
     setError('')
+    setUploadStatus('uploading')
 
     try {
       if (!newVideo.categoryId) {
         setError('Please select a category')
-        setSubmitting(false)
+        setUploadStatus('error')
         return
       }
 
+      if (!videoFile) {
+        setError('Please select a video file')
+        setUploadStatus('error')
+        return
+      }
+
+      // Get session for auth token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        setError('Session expired')
+        setUploadStatus('error')
+        return
+      }
+
+      const authHeader = `Bearer ${session.access_token}`
+
+      // Parse tags
       const tags = newVideo.tags
         .split(',')
         .map((tag) => tag.trim())
         .filter((tag) => tag.length > 0)
 
-      const { error: insertError } = await supabase.from('videos').insert({
-        title: newVideo.title,
-        description: newVideo.description,
-        category_id: newVideo.categoryId,
-        tags,
+      // Step 1: Call upload API to get Mux URL
+      console.log('Calling /api/videos/upload...')
+      const uploadResponse = await fetch('/api/videos/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+        },
+        body: JSON.stringify({
+          title: newVideo.title,
+          description: newVideo.description,
+          category_id: newVideo.categoryId,
+          tags,
+        }),
       })
 
-      if (insertError) {
-        setError('Failed to create video')
-        setSubmitting(false)
+      if (!uploadResponse.ok) {
+        const error = await uploadResponse.json()
+        setError(error.error || 'Failed to initiate upload')
+        setUploadStatus('error')
         return
       }
 
-      // Reset form and refresh videos
+      const { uploadUrl, videoId } = await uploadResponse.json()
+      console.log('✓ Got upload URL, videoId:', videoId)
+      setUploadingVideoId(videoId)
+
+      // Step 2: Upload file directly to Mux
+      console.log('Uploading video file to Mux...')
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const progress = Math.round((e.loaded / e.total) * 100)
+            setUploadProgress(progress)
+          }
+        })
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('✓ File uploaded to Mux')
+            resolve()
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`))
+          }
+        })
+
+        xhr.addEventListener('error', () => {
+          reject(new Error('Upload failed'))
+        })
+
+        xhr.open('PUT', uploadUrl)
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+        xhr.send(videoFile)
+      })
+
+      // Step 3: Poll status until ready
+      setUploadStatus('processing')
+      setUploadProgress(0)
+      console.log('Polling for video readiness...')
+
+      let isReady = false
+      let pollCount = 0
+      const maxPolls = 60 // 5 minutes with 5s interval
+
+      while (!isReady && pollCount < maxPolls) {
+        await new Promise((resolve) => setTimeout(resolve, 5000))
+        pollCount++
+
+        const statusResponse = await fetch(`/api/videos/${videoId}`, {
+          method: 'GET',
+          headers: { 'Authorization': authHeader },
+        })
+
+        if (!statusResponse.ok) {
+          console.error('Status check failed')
+          continue
+        }
+
+        const video = await statusResponse.json()
+        console.log('Video status:', video.status)
+
+        if (video.status === 'ready') {
+          isReady = true
+          setUploadStatus('ready')
+          console.log('✓ Video is ready')
+        } else if (video.status === 'errored') {
+          throw new Error('Video processing failed')
+        }
+      }
+
+      if (!isReady) {
+        throw new Error('Video processing timeout')
+      }
+
+      // Success - reset form and refresh
+      setSuccessMessage(`Video "${newVideo.title}" uploaded successfully!`)
       setNewVideo({ title: '', description: '', categoryId: '', tags: '' })
+      setVideoFile(null)
+      setUploadProgress(0)
+      setUploadStatus('idle')
+      setUploadingVideoId(null)
       setShowAddVideoForm(false)
       await fetchVideos()
-      setSubmitting(false)
+
+      setTimeout(() => setSuccessMessage(''), 5000)
     } catch (err) {
-      setError('An error occurred')
-      setSubmitting(false)
+      console.error('Upload error:', err)
+      setError(err instanceof Error ? err.message : 'An error occurred')
+      setUploadStatus('error')
     }
   }
 
@@ -638,21 +755,112 @@ export default function AdminPage() {
                       }}
                     />
                   </div>
+
+                  {/* File Upload Area */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                      Video File
+                    </label>
+                    <div
+                      className="relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        borderColor: videoFile ? 'var(--color-accent)' : 'var(--color-border)',
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        const files = e.dataTransfer.files
+                        if (files.length > 0) {
+                          setVideoFile(files[0])
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                      }}
+                    >
+                      <input
+                        id="videoFile"
+                        type="file"
+                        accept="video/*"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            setVideoFile(e.target.files[0])
+                          }
+                        }}
+                        className="hidden"
+                      />
+                      <label htmlFor="videoFile" className="cursor-pointer">
+                        {videoFile ? (
+                          <p style={{ color: 'var(--color-text-primary)' }} className="font-medium">
+                            {videoFile.name}
+                          </p>
+                        ) : (
+                          <>
+                            <p style={{ color: 'var(--color-text-primary)' }} className="font-medium">
+                              Drag and drop your video here
+                            </p>
+                            <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm mt-1">
+                              or click to browse
+                            </p>
+                          </>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Upload Progress Bar */}
+                  {uploadStatus !== 'idle' && uploadProgress > 0 && (
+                    <div>
+                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                        Upload Progress: {uploadProgress}%
+                      </label>
+                      <div className="w-full h-2 rounded-full" style={{ backgroundColor: 'var(--color-bg-primary)' }}>
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${uploadProgress}%`,
+                            backgroundColor: 'var(--color-accent)',
+                          }}
+                        />
+                      </div>
+                      {uploadStatus === 'processing' && (
+                        <p style={{ color: 'var(--color-accent)' }} className="text-xs mt-2">
+                          Processing video... this may take a few minutes
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <button
                     type="submit"
-                    disabled={submitting}
+                    disabled={uploadStatus !== 'idle' && uploadStatus !== 'error'}
                     className="w-full py-2 rounded-lg text-white font-semibold transition"
                     style={{
-                      backgroundColor: submitting ? 'rgba(193, 123, 138, 0.5)' : 'var(--color-accent)',
+                      backgroundColor:
+                        uploadStatus !== 'idle' && uploadStatus !== 'error'
+                          ? 'rgba(193, 123, 138, 0.5)'
+                          : 'var(--color-accent)',
                     }}
                     onMouseEnter={(e) => {
-                      if (!submitting) e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
+                      if (uploadStatus === 'idle' || uploadStatus === 'error') {
+                        e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
+                      }
                     }}
                     onMouseLeave={(e) => {
-                      if (!submitting) e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                      if (uploadStatus === 'idle' || uploadStatus === 'error') {
+                        e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                      }
                     }}
                   >
-                    {submitting ? 'Creating...' : 'Create Video'}
+                    {uploadStatus === 'uploading'
+                      ? 'Uploading...'
+                      : uploadStatus === 'processing'
+                      ? 'Processing...'
+                      : uploadStatus === 'ready'
+                      ? 'Complete!'
+                      : uploadStatus === 'error'
+                      ? 'Retry Upload'
+                      : 'Upload Video'}
                   </button>
                 </form>
               </div>
@@ -670,9 +878,33 @@ export default function AdminPage() {
                       style={{ backgroundColor: 'var(--color-bg-secondary)' }}
                     >
                       <div className="flex-1">
-                        <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                          {video.title}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                            {video.title}
+                          </p>
+                          {video.status && (
+                            <span
+                              className="px-2 py-1 rounded-full text-xs font-semibold"
+                              style={{
+                                backgroundColor:
+                                  video.status === 'ready'
+                                    ? 'rgba(193, 123, 138, 0.2)'
+                                    : video.status === 'processing'
+                                    ? 'rgba(193, 123, 138, 0.3)'
+                                    : 'rgba(0, 0, 0, 0.2)',
+                                color: 'var(--color-accent)',
+                              }}
+                            >
+                              {video.status === 'ready'
+                                ? 'Ready'
+                                : video.status === 'uploading'
+                                ? 'Uploading'
+                                : video.status === 'processing'
+                                ? 'Processing'
+                                : 'Error'}
+                            </span>
+                          )}
+                        </div>
                         <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm">
                           {category?.name || 'Uncategorized'}
                         </p>

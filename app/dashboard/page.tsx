@@ -5,30 +5,34 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
 import { LogOut, Home, Play, User, Search, X, Sun, Moon } from 'lucide-react'
+import MuxPlayer from '@mux/mux-player-react'
 
-interface User {
+interface AuthUser {
   email?: string
 }
 
-const CATEGORIES = ['All', 'Shoulders', 'Legs', 'Back', 'Chest', 'Core']
-
-const DUMMY_WORKOUTS = [
-  { id: 1, title: 'Shoulder Press Basics', category: 'Shoulders' },
-  { id: 2, title: 'Leg Day Essentials', category: 'Legs' },
-  { id: 3, title: 'Back Strength Training', category: 'Back' },
-  { id: 4, title: 'Chest Workout Series', category: 'Chest' },
-  { id: 5, title: 'Core Stability Work', category: 'Core' },
-  { id: 6, title: 'Full Body Stretch', category: 'Shoulders' },
-]
+interface Video {
+  id: string
+  title: string
+  description?: string
+  mux_playback_id?: string
+  thumbnail_url?: string
+  categories?: { name: string }
+  category_id?: string
+  status?: string
+}
 
 export default function DashboardPage() {
   const router = useRouter()
   const { theme, toggleTheme, mounted } = useTheme()
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
-  const [filteredWorkouts, setFilteredWorkouts] = useState(DUMMY_WORKOUTS)
+  const [categories, setCategories] = useState<string[]>(['All'])
+  const [videos, setVideos] = useState<Video[]>([])
+  const [filteredWorkouts, setFilteredWorkouts] = useState<Video[]>([])
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
 
   useEffect(() => {
     checkAuth()
@@ -36,7 +40,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     filterWorkouts()
-  }, [searchQuery, selectedCategory])
+  }, [searchQuery, selectedCategory, videos])
 
   const checkAuth = async () => {
     const {
@@ -48,20 +52,44 @@ export default function DashboardPage() {
       return
     }
 
-    setUser(session.user as User)
+    setUser(session.user as AuthUser)
+    await Promise.all([fetchCategories(), fetchVideos()])
     setLoading(false)
   }
 
+  const fetchCategories = async () => {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('name')
+      .order('name', { ascending: true })
+
+    if (!error && data) {
+      setCategories(['All', ...data.map((c) => c.name)])
+    }
+  }
+
+  const fetchVideos = async () => {
+    const { data, error } = await supabase
+      .from('videos')
+      .select('*, categories(name)')
+      .eq('status', 'ready')
+      .order('created_at', { ascending: false })
+
+    if (!error && data) {
+      setVideos(data as Video[])
+    }
+  }
+
   const filterWorkouts = () => {
-    let filtered = DUMMY_WORKOUTS
+    let filtered = videos
 
     if (selectedCategory !== 'All') {
-      filtered = filtered.filter((w) => w.category === selectedCategory)
+      filtered = filtered.filter((v) => (v.categories as any)?.name === selectedCategory)
     }
 
     if (searchQuery) {
-      filtered = filtered.filter((w) =>
-        w.title.toLowerCase().includes(searchQuery.toLowerCase())
+      filtered = filtered.filter((v) =>
+        v.title.toLowerCase().includes(searchQuery.toLowerCase())
       )
     }
 
@@ -161,7 +189,7 @@ export default function DashboardPage() {
 
         {/* Category Filter Pills */}
         <div className="mb-8 flex gap-2 overflow-x-auto pb-2">
-          {CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <button
               key={category}
               onClick={() => setSelectedCategory(category)}
@@ -181,28 +209,37 @@ export default function DashboardPage() {
           <h3 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text-primary)' }}>Workouts</h3>
           {filteredWorkouts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredWorkouts.map((workout) => (
+              {filteredWorkouts.map((video) => (
                 <div
-                  key={workout.id}
+                  key={video.id}
+                  onClick={() => setSelectedVideo(video)}
                   className="rounded-lg overflow-hidden hover:transform hover:scale-105 transition duration-200 cursor-pointer"
                   style={{ backgroundColor: 'var(--color-bg-secondary)' }}
                 >
-                  {/* Thumbnail Placeholder */}
+                  {/* Thumbnail */}
                   <div className="w-full aspect-video flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg-card)' }}>
-                    <Play size={48} style={{ color: 'var(--color-accent)', opacity: 0.3 }} />
+                    {video.thumbnail_url ? (
+                      <img
+                        src={video.thumbnail_url}
+                        alt={video.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Play size={48} style={{ color: 'var(--color-accent)', opacity: 0.3 }} />
+                    )}
                   </div>
 
                   {/* Card Content */}
                   <div className="p-4">
                     <h4 className="font-semibold mb-2 line-clamp-2" style={{ color: 'var(--color-text-primary)' }}>
-                      {workout.title}
+                      {video.title}
                     </h4>
                     <div className="flex items-center justify-between">
                       <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                        Duration: 20 min
+                        Duration: {video.duration ? Math.round(video.duration / 60) + ' min' : 'N/A'}
                       </span>
                       <span className="px-3 py-1 text-xs font-semibold rounded-full" style={{ backgroundColor: 'var(--color-badge)', color: 'var(--color-accent)' }}>
-                        {workout.category}
+                        {(video.categories as any)?.name || 'Other'}
                       </span>
                     </div>
                   </div>
@@ -217,6 +254,45 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* Video Player Modal */}
+        {selectedVideo && selectedVideo.mux_playback_id && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}
+            onClick={() => setSelectedVideo(null)}
+          >
+            <div
+              className="relative w-full max-w-4xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setSelectedVideo(null)}
+                className="absolute -top-12 right-0 transition"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X size={32} />
+              </button>
+              <div className="w-full bg-black rounded-lg overflow-hidden">
+                <MuxPlayer
+                  playbackId={selectedVideo.mux_playback_id}
+                  streamType="on-demand"
+                  autoPlay
+                />
+              </div>
+              <div className="mt-4">
+                <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
+                  {selectedVideo.title}
+                </h2>
+                {selectedVideo.description && (
+                  <p className="text-sm mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    {selectedVideo.description}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Bottom Navigation */}
