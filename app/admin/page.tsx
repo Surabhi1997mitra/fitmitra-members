@@ -1,10 +1,24 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
-import { LogOut, Sun, Moon, Plus, Trash2, X } from 'lucide-react'
+import { LogOut, Sun, Moon, Plus, Trash2, X, ArrowLeft } from 'lucide-react'
+
+interface UploadItem {
+  id: string
+  file: File
+  title: string
+  description: string
+  categoryId: string
+  tags: string
+  progress: number
+  status: 'queued' | 'uploading' | 'processing' | 'done' | 'error'
+  error?: string
+  videoId?: string
+}
 
 interface Profile {
   id: string
@@ -57,16 +71,8 @@ export default function AdminPage() {
   const [videos, setVideos] = useState<Video[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [showAddVideoForm, setShowAddVideoForm] = useState(false)
-  const [newVideo, setNewVideo] = useState({
-    title: '',
-    description: '',
-    categoryId: '',
-    tags: '',
-  })
-  const [videoFile, setVideoFile] = useState<File | null>(null)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'ready' | 'error'>('idle')
-  const [uploadingVideoId, setUploadingVideoId] = useState<string | null>(null)
+  const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([])
+  const xhrMap = useRef<Map<string, XMLHttpRequest>>(new Map())
 
   useEffect(() => {
     checkAuth()
@@ -223,82 +229,66 @@ export default function AdminPage() {
     await fetchUsers()
   }
 
-  const handleCreateVideo = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    setUploadStatus('uploading')
+  const updateItem = (id: string, patch: Partial<UploadItem>) => {
+    setUploadQueue((q) =>
+      q.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    )
+  }
 
+  const handleFilesSelected = (files: FileList) => {
+    const newItems: UploadItem[] = Array.from(files).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      title: file.name.replace(/\.[^.]+$/, ''),
+      description: '',
+      categoryId: '',
+      tags: '',
+      progress: 0,
+      status: 'queued',
+    }))
+    setUploadQueue((prev) => [...prev, ...newItems])
+  }
+
+  const uploadSingleFile = async (item: UploadItem, authHeader: string) => {
     try {
-      if (!newVideo.categoryId) {
-        setError('Please select a category')
-        setUploadStatus('error')
-        return
-      }
+      updateItem(item.id, { status: 'uploading' })
 
-      if (!videoFile) {
-        setError('Please select a video file')
-        setUploadStatus('error')
-        return
-      }
-
-      // Get session for auth token
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        setError('Session expired')
-        setUploadStatus('error')
-        return
-      }
-
-      const authHeader = `Bearer ${session.access_token}`
-
-      // Parse tags
-      const tags = newVideo.tags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0)
-
-      // Step 1: Call upload API to get Mux URL
-      console.log('Calling /api/videos/upload...')
-      const uploadResponse = await fetch('/api/videos/upload', {
+      // Step 1: Get upload URL
+      const createUploadResponse = await fetch('/api/videos/upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': authHeader,
         },
         body: JSON.stringify({
-          title: newVideo.title,
-          description: newVideo.description,
-          category_id: newVideo.categoryId,
-          tags,
+          title: item.title,
+          description: item.description,
+          category_id: item.categoryId,
+          tags: item.tags ? item.tags.split(',').map((t) => t.trim()) : [],
         }),
       })
 
-      if (!uploadResponse.ok) {
-        const error = await uploadResponse.json()
-        setError(error.error || 'Failed to initiate upload')
-        setUploadStatus('error')
-        return
+      if (!createUploadResponse.ok) {
+        const errorData = await createUploadResponse.json()
+        throw new Error(errorData.error || 'Failed to create upload')
       }
 
-      const { uploadUrl, videoId } = await uploadResponse.json()
-      console.log('✓ Got upload URL, videoId:', videoId)
-      setUploadingVideoId(videoId)
+      const { uploadUrl, videoId } = await createUploadResponse.json()
+      updateItem(item.id, { videoId })
 
-      // Step 2: Upload file directly to Mux
-      console.log('Uploading video file to Mux...')
+      // Step 2: Upload file with XHR
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
 
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
             const progress = Math.round((e.loaded / e.total) * 100)
-            setUploadProgress(progress)
+            updateItem(item.id, { progress })
           }
         })
 
         xhr.addEventListener('load', () => {
           if (xhr.status >= 200 && xhr.status < 300) {
-            console.log('✓ File uploaded to Mux')
             resolve()
           } else {
             reject(new Error(`Upload failed with status ${xhr.status}`))
@@ -311,17 +301,17 @@ export default function AdminPage() {
 
         xhr.open('PUT', uploadUrl)
         xhr.setRequestHeader('Content-Type', 'application/octet-stream')
-        xhr.send(videoFile)
+        xhrMap.current.set(item.id, xhr)
+        xhr.send(item.file)
       })
 
-      // Step 3: Poll status until ready
-      setUploadStatus('processing')
-      setUploadProgress(0)
-      console.log('Polling for video readiness...')
+      xhrMap.current.delete(item.id)
+      updateItem(item.id, { status: 'processing', progress: 100 })
 
+      // Step 3: Poll until ready
       let isReady = false
       let pollCount = 0
-      const maxPolls = 60 // 5 minutes with 5s interval
+      const maxPolls = 60
 
       while (!isReady && pollCount < maxPolls) {
         await new Promise((resolve) => setTimeout(resolve, 5000))
@@ -332,44 +322,72 @@ export default function AdminPage() {
           headers: { 'Authorization': authHeader },
         })
 
-        if (!statusResponse.ok) {
-          console.error('Status check failed')
-          continue
-        }
+        if (!statusResponse.ok) continue
 
         const video = await statusResponse.json()
-        console.log('Video status:', video.status)
 
         if (video.status === 'ready') {
           isReady = true
-          setUploadStatus('ready')
-          console.log('✓ Video is ready')
+          updateItem(item.id, { status: 'done' })
+          await fetchVideos()
         } else if (video.status === 'errored') {
           throw new Error('Video processing failed')
         }
       }
 
-      if (!isReady) {
-        throw new Error('Video processing timeout')
-      }
-
-      // Success - reset form and refresh
-      setSuccessMessage(`Video "${newVideo.title}" uploaded successfully!`)
-      setNewVideo({ title: '', description: '', categoryId: '', tags: '' })
-      setVideoFile(null)
-      setUploadProgress(0)
-      setUploadStatus('idle')
-      setUploadingVideoId(null)
-      setShowAddVideoForm(false)
-      await fetchVideos()
-
-      setTimeout(() => setSuccessMessage(''), 5000)
+      if (!isReady) throw new Error('Processing timeout')
     } catch (err) {
-      console.error('Upload error:', err)
-      setError(err instanceof Error ? err.message : 'An error occurred')
-      setUploadStatus('error')
+      xhrMap.current.delete(item.id)
+      updateItem(item.id, {
+        status: 'error',
+        error: err instanceof Error ? err.message : 'Unknown error',
+      })
     }
   }
+
+  const handleUploadAll = async () => {
+    const queuedItems = uploadQueue.filter((item) => item.status === 'queued')
+    if (queuedItems.length === 0) return
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      setError('Session expired')
+      return
+    }
+
+    const authHeader = `Bearer ${session.access_token}`
+
+    // Fire all uploads in parallel
+    queuedItems.forEach((item) => {
+      uploadSingleFile(item, authHeader)
+    })
+  }
+
+  const handleCancelUpload = (id: string) => {
+    const item = uploadQueue.find((i) => i.id === id)
+    if (!item) return
+
+    if (item.status === 'uploading') {
+      xhrMap.current.get(id)?.abort()
+      xhrMap.current.delete(id)
+    }
+
+    setUploadQueue((q) => q.filter((i) => i.id !== id))
+  }
+
+  const clearDoneItems = () => {
+    setUploadQueue((q) => q.filter((i) => i.status !== 'done'))
+  }
+
+  // Auto-refresh videos every 30s when processing
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (uploadQueue.some((item) => item.status === 'processing')) {
+        fetchVideos()
+      }
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [uploadQueue])
 
   const handleDeleteVideo = async (videoId: string) => {
     const confirmed = window.confirm('Delete this video?')
@@ -415,10 +433,23 @@ export default function AdminPage() {
       {/* Header */}
       <header className="sticky top-0 z-40" style={{ backgroundColor: 'var(--color-bg-primary)', borderBottomColor: 'var(--color-border)', borderBottomWidth: '1px' }}>
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">
-            <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
-            <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
-          </h1>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/dashboard"
+              className="p-2 rounded-lg transition flex items-center justify-center"
+              style={{
+                backgroundColor: 'var(--color-bg-secondary)',
+                color: 'var(--color-text-secondary)',
+              }}
+              title="Back to dashboard"
+            >
+              <ArrowLeft size={20} />
+            </Link>
+            <h1 className="text-2xl font-bold">
+              <span style={{ color: 'var(--color-text-primary)' }}>Fit</span>
+              <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
+            </h1>
+          </div>
           <div className="flex items-center gap-4">
             <button
               onClick={toggleTheme}
@@ -645,30 +676,40 @@ export default function AdminPage() {
               <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
                 Videos
               </h2>
-              <button
-                onClick={() => setShowAddVideoForm(!showAddVideoForm)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-white transition font-semibold"
-                style={{
-                  backgroundColor: 'var(--color-accent)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--color-accent)'
-                }}
-              >
-                <Plus size={20} />
-                Add New Video
-              </button>
+              <div className="flex items-center gap-2">
+                {!showAddVideoForm && uploadQueue.some((i) => ['uploading', 'processing'].includes(i.status)) && (
+                  <span
+                    className="px-3 py-1 rounded-full text-xs font-semibold"
+                    style={{ backgroundColor: 'var(--color-accent)', color: 'white' }}
+                  >
+                    {uploadQueue.filter((i) => ['uploading', 'processing'].includes(i.status)).length} active
+                  </span>
+                )}
+                <button
+                  onClick={() => setShowAddVideoForm(!showAddVideoForm)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-white transition font-semibold"
+                  style={{
+                    backgroundColor: 'var(--color-accent)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                  }}
+                >
+                  <Plus size={20} />
+                  Add Videos
+                </button>
+              </div>
             </div>
 
-            {/* Add Video Form */}
+            {/* Upload Queue Panel */}
             {showAddVideoForm && (
               <div className="mb-6 p-6 rounded-lg" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                    New Video
+                    Upload Videos
                   </h3>
                   <button
                     onClick={() => setShowAddVideoForm(false)}
@@ -677,192 +718,203 @@ export default function AdminPage() {
                     <X size={20} />
                   </button>
                 </div>
-                <form onSubmit={handleCreateVideo} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      Title
-                    </label>
-                    <input
-                      type="text"
-                      value={newVideo.title}
-                      onChange={(e) => setNewVideo({ ...newVideo, title: e.target.value })}
-                      required
-                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-bg-primary)',
-                        borderColor: 'var(--color-border)',
-                        borderWidth: '1px',
-                        color: 'var(--color-text-primary)',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      Description
-                    </label>
-                    <textarea
-                      value={newVideo.description}
-                      onChange={(e) => setNewVideo({ ...newVideo, description: e.target.value })}
-                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
-                      rows={3}
-                      style={{
-                        backgroundColor: 'var(--color-bg-primary)',
-                        borderColor: 'var(--color-border)',
-                        borderWidth: '1px',
-                        color: 'var(--color-text-primary)',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      Category
-                    </label>
-                    <select
-                      value={newVideo.categoryId}
-                      onChange={(e) => setNewVideo({ ...newVideo, categoryId: e.target.value })}
-                      required
-                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-bg-primary)',
-                        borderColor: 'var(--color-border)',
-                        borderWidth: '1px',
-                        color: 'var(--color-text-primary)',
-                      }}
-                    >
-                      <option value="">Select a category</option>
-                      {categories.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      Tags (comma-separated)
-                    </label>
-                    <input
-                      type="text"
-                      value={newVideo.tags}
-                      onChange={(e) => setNewVideo({ ...newVideo, tags: e.target.value })}
-                      placeholder="e.g. beginner, arms, strength"
-                      className="w-full px-4 py-2 rounded-lg focus:outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-bg-primary)',
-                        borderColor: 'var(--color-border)',
-                        borderWidth: '1px',
-                        color: 'var(--color-text-primary)',
-                      }}
-                    />
-                  </div>
 
-                  {/* File Upload Area */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      Video File
-                    </label>
-                    <div
-                      className="relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition"
-                      style={{
-                        backgroundColor: 'var(--color-bg-primary)',
-                        borderColor: videoFile ? 'var(--color-accent)' : 'var(--color-border)',
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        const files = e.dataTransfer.files
-                        if (files.length > 0) {
-                          setVideoFile(files[0])
-                        }
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                      }}
-                    >
-                      <input
-                        id="videoFile"
-                        type="file"
-                        accept="video/*"
-                        onChange={(e) => {
-                          if (e.target.files && e.target.files.length > 0) {
-                            setVideoFile(e.target.files[0])
-                          }
-                        }}
-                        className="hidden"
-                      />
-                      <label htmlFor="videoFile" className="cursor-pointer">
-                        {videoFile ? (
-                          <p style={{ color: 'var(--color-text-primary)' }} className="font-medium">
-                            {videoFile.name}
-                          </p>
-                        ) : (
-                          <>
-                            <p style={{ color: 'var(--color-text-primary)' }} className="font-medium">
-                              Drag and drop your video here
-                            </p>
-                            <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm mt-1">
-                              or click to browse
-                            </p>
-                          </>
-                        )}
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Upload Progress Bar */}
-                  {uploadStatus !== 'idle' && uploadProgress > 0 && (
-                    <div>
-                      <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                        Upload Progress: {uploadProgress}%
-                      </label>
-                      <div className="w-full h-2 rounded-full" style={{ backgroundColor: 'var(--color-bg-primary)' }}>
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${uploadProgress}%`,
-                            backgroundColor: 'var(--color-accent)',
-                          }}
-                        />
-                      </div>
-                      {uploadStatus === 'processing' && (
-                        <p style={{ color: 'var(--color-accent)' }} className="text-xs mt-2">
-                          Processing video... this may take a few minutes
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={uploadStatus !== 'idle' && uploadStatus !== 'error'}
-                    className="w-full py-2 rounded-lg text-white font-semibold transition"
+                {/* File Input */}
+                <div className="mb-6">
+                  <label htmlFor="bulkFileInput" className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    Select Videos
+                  </label>
+                  <div
+                    className="relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition"
                     style={{
-                      backgroundColor:
-                        uploadStatus !== 'idle' && uploadStatus !== 'error'
-                          ? 'rgba(193, 123, 138, 0.5)'
-                          : 'var(--color-accent)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                      borderColor: 'var(--color-border)',
                     }}
-                    onMouseEnter={(e) => {
-                      if (uploadStatus === 'idle' || uploadStatus === 'error') {
-                        e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
-                      }
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      handleFilesSelected(e.dataTransfer.files)
                     }}
-                    onMouseLeave={(e) => {
-                      if (uploadStatus === 'idle' || uploadStatus === 'error') {
-                        e.currentTarget.style.backgroundColor = 'var(--color-accent)'
-                      }
+                    onDragOver={(e) => {
+                      e.preventDefault()
                     }}
                   >
-                    {uploadStatus === 'uploading'
-                      ? 'Uploading...'
-                      : uploadStatus === 'processing'
-                      ? 'Processing...'
-                      : uploadStatus === 'ready'
-                      ? 'Complete!'
-                      : uploadStatus === 'error'
-                      ? 'Retry Upload'
-                      : 'Upload Video'}
-                  </button>
-                </form>
+                    <input
+                      id="bulkFileInput"
+                      type="file"
+                      accept="video/*"
+                      multiple
+                      onChange={(e) => {
+                        if (e.target.files) {
+                          handleFilesSelected(e.target.files)
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label htmlFor="bulkFileInput" className="cursor-pointer">
+                      <p style={{ color: 'var(--color-text-primary)' }} className="font-medium">
+                        Drag and drop videos here
+                      </p>
+                      <p style={{ color: 'var(--color-text-secondary)' }} className="text-sm mt-1">
+                        or click to browse
+                      </p>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Upload Queue */}
+                {uploadQueue.length > 0 && (
+                  <div className="mb-6">
+                    <div className="space-y-4">
+                      {uploadQueue.map((item) => (
+                        <div key={item.id} className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)' }}>
+                          {/* File name and cancel button */}
+                          <div className="flex items-center justify-between mb-2">
+                            <p style={{ color: 'var(--color-text-primary)' }} className="font-medium text-sm truncate flex-1">
+                              {item.file.name}
+                            </p>
+                            <button
+                              onClick={() => handleCancelUpload(item.id)}
+                              className="ml-2 p-1 rounded transition hover:opacity-70"
+                              style={{ color: 'var(--color-text-secondary)' }}
+                              disabled={item.status === 'done'}
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+
+                          {/* Metadata (editable only when queued) */}
+                          {item.status === 'queued' && (
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <input
+                                type="text"
+                                value={item.title}
+                                onChange={(e) => updateItem(item.id, { title: e.target.value })}
+                                placeholder="Title"
+                                className="px-2 py-1 rounded text-sm focus:outline-none"
+                                style={{
+                                  backgroundColor: 'var(--color-bg-secondary)',
+                                  borderColor: 'var(--color-border)',
+                                  borderWidth: '1px',
+                                  color: 'var(--color-text-primary)',
+                                }}
+                              />
+                              <select
+                                value={item.categoryId}
+                                onChange={(e) => updateItem(item.id, { categoryId: e.target.value })}
+                                className="px-2 py-1 rounded text-sm focus:outline-none"
+                                style={{
+                                  backgroundColor: 'var(--color-bg-secondary)',
+                                  borderColor: 'var(--color-border)',
+                                  borderWidth: '1px',
+                                  color: 'var(--color-text-primary)',
+                                }}
+                              >
+                                <option value="">Category</option>
+                                {categories.map((cat) => (
+                                  <option key={cat.id} value={cat.id}>
+                                    {cat.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {/* Progress bar */}
+                          {item.status !== 'queued' && (
+                            <div className="mb-2">
+                              <div className="w-full h-2 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                                <div
+                                  className="h-full rounded-full transition-all"
+                                  style={{
+                                    width: `${item.progress}%`,
+                                    backgroundColor: 'var(--color-accent)',
+                                  }}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between mt-1">
+                                <span style={{ color: 'var(--color-text-muted)' }} className="text-xs">
+                                  {item.progress}%
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Status badge */}
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="px-2 py-1 rounded text-xs font-semibold"
+                              style={{
+                                backgroundColor:
+                                  item.status === 'queued'
+                                    ? 'rgba(0, 0, 0, 0.2)'
+                                    : item.status === 'uploading'
+                                    ? 'var(--color-accent)'
+                                    : item.status === 'processing'
+                                    ? 'rgba(251, 191, 36, 0.15)'
+                                    : item.status === 'done'
+                                    ? 'rgba(34, 197, 94, 0.15)'
+                                    : 'rgba(239, 68, 68, 0.15)',
+                                color:
+                                  item.status === 'queued'
+                                    ? 'var(--color-text-muted)'
+                                    : item.status === 'uploading'
+                                    ? 'white'
+                                    : item.status === 'processing'
+                                    ? '#d97706'
+                                    : item.status === 'done'
+                                    ? '#16a34a'
+                                    : '#dc2626',
+                              }}
+                            >
+                              {item.status === 'queued' ? 'Queued' : item.status === 'uploading' ? 'Uploading' : item.status === 'processing' ? 'Processing' : item.status === 'done' ? 'Done' : 'Error'}
+                            </span>
+                            {item.error && (
+                              <span style={{ color: '#dc2626' }} className="text-xs">
+                                {item.error}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        onClick={handleUploadAll}
+                        disabled={!uploadQueue.some((i) => i.status === 'queued')}
+                        className="flex-1 py-2 rounded-lg text-white font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          backgroundColor: 'var(--color-accent)',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (uploadQueue.some((i) => i.status === 'queued')) {
+                            e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                        }}
+                      >
+                        Upload All ({uploadQueue.filter((i) => i.status === 'queued').length})
+                      </button>
+                      {uploadQueue.some((i) => i.status === 'done') && (
+                        <button
+                          onClick={clearDoneItems}
+                          className="px-4 py-2 rounded-lg transition"
+                          style={{
+                            backgroundColor: 'var(--color-bg-primary)',
+                            borderColor: 'var(--color-border)',
+                            borderWidth: '1px',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >
+                          Clear Done
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

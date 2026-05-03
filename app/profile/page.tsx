@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
-import { LogOut, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LogOut, Sun, Moon, ChevronLeft, ChevronRight, Home, Play, User } from 'lucide-react'
 
 interface ProfileData {
   // Step 1: Personal Details
@@ -450,6 +451,37 @@ export default function ProfilePage() {
           </div>
         )}
       </main>
+
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0" style={{ backgroundColor: 'var(--color-bg-secondary)', borderTopColor: 'var(--color-border)', borderTopWidth: '1px' }}>
+        <div className="max-w-6xl mx-auto px-4 flex items-center justify-around">
+          <Link
+            href="/dashboard"
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <Home size={24} />
+            <span className="text-xs mt-1 font-medium">Home</span>
+          </Link>
+          <Link
+            href="/dashboard"
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-text-secondary)' }}
+            onClick={() => document.getElementById('workouts-section')?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            <Play size={24} />
+            <span className="text-xs mt-1 font-medium">Workouts</span>
+          </Link>
+          <Link
+            href="/profile"
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            <User size={24} />
+            <span className="text-xs mt-1 font-medium">Profile</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   )
 }

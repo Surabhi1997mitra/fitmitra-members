@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme-provider'
@@ -9,6 +10,7 @@ import MuxPlayer from '@mux/mux-player-react'
 
 interface AuthUser {
   email?: string
+  id?: string
 }
 
 interface Video {
@@ -27,6 +29,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const { theme, toggleTheme, mounted } = useTheme()
   const [user, setUser] = useState<AuthUser | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
@@ -53,7 +56,19 @@ export default function DashboardPage() {
       return
     }
 
-    setUser(session.user as AuthUser)
+    setUser({ ...session.user, id: session.user.id } as AuthUser)
+
+    // Check if user is admin
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', session.user.id)
+      .single()
+
+    if (profile?.is_admin) {
+      setIsAdmin(true)
+    }
+
     await Promise.all([fetchCategories(), fetchVideos()])
     setLoading(false)
   }
@@ -120,6 +135,18 @@ export default function DashboardPage() {
             <span style={{ color: 'var(--color-accent)' }}>Mitra</span>
           </h1>
           <div className="flex items-center gap-4">
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="px-3 py-2 rounded-lg transition text-sm font-medium"
+                style={{
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'white',
+                }}
+              >
+                Admin
+              </Link>
+            )}
             <button
               onClick={toggleTheme}
               className="p-2 rounded-lg transition"
@@ -206,7 +233,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Workouts Section */}
-        <div>
+        <div id="workouts-section">
           <h3 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text-primary)' }}>Workouts</h3>
           {filteredWorkouts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -299,22 +326,30 @@ export default function DashboardPage() {
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0" style={{ backgroundColor: 'var(--color-bg-secondary)', borderTopColor: 'var(--color-border)', borderTopWidth: '1px' }}>
         <div className="max-w-6xl mx-auto px-4 flex items-center justify-around">
-          <button className="flex flex-col items-center justify-center py-4 transition" style={{ color: 'var(--color-accent)' }}>
+          <Link
+            href="/dashboard"
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-accent)' }}
+          >
             <Home size={24} />
             <span className="text-xs mt-1 font-medium">Home</span>
-          </button>
-          <button className="flex flex-col items-center justify-center py-4 transition" style={{ color: 'var(--color-text-secondary)' }}>
+          </Link>
+          <button
+            onClick={() => document.getElementById('workouts-section')?.scrollIntoView({ behavior: 'smooth' })}
+            className="flex flex-col items-center justify-center py-4 transition"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
             <Play size={24} />
             <span className="text-xs mt-1 font-medium">Workouts</span>
           </button>
-          <button
-            onClick={() => router.push('/profile')}
+          <Link
+            href="/profile"
             className="flex flex-col items-center justify-center py-4 transition"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <User size={24} />
             <span className="text-xs mt-1 font-medium">Profile</span>
-          </button>
+          </Link>
         </div>
       </nav>
     </div>
