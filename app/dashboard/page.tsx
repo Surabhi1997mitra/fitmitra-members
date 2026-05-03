@@ -326,14 +326,14 @@ export default function DashboardPage() {
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0" style={{ backgroundColor: 'var(--color-bg-secondary)', borderTopColor: 'var(--color-border)', borderTopWidth: '1px' }}>
         <div className="max-w-6xl mx-auto px-4 flex items-center justify-around">
-          <Link
-            href="/dashboard"
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
             className="flex flex-col items-center justify-center py-4 transition"
             style={{ color: 'var(--color-accent)' }}
           >
             <Home size={24} />
             <span className="text-xs mt-1 font-medium">Home</span>
-          </Link>
+          </button>
           <button
             onClick={() => document.getElementById('workouts-section')?.scrollIntoView({ behavior: 'smooth' })}
             className="flex flex-col items-center justify-center py-4 transition"
