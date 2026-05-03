@@ -17,6 +17,7 @@ interface Video {
   description?: string
   mux_playback_id?: string
   thumbnail_url?: string
+  duration?: number
   categories?: { name: string }
   category_id?: string
   status?: string
