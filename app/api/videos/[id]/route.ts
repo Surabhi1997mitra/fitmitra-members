@@ -29,10 +29,10 @@ function decodeJWT(token: string): JWTPayload | null {
   }
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     console.log('=== VIDEO STATUS CHECK ===')
-    const videoId = params.id
+    const { id: videoId } = await params
 
     // Get authorization header
     const authHeader = request.headers.get('authorization')
